@@ -1,4 +1,4 @@
-# check_socketlabs
+# Nagios plugin: check_socketlabs
 
 This is a nagios plugin that interacts with the 
 [SocketLabs API](http://www.socketlabs.com/api-reference/) 
@@ -14,13 +14,11 @@ can be set by defining the length of the window and the offset from now. To
 check from 2 minutes ago to 10 minutes ago, one could set the `threshold` 
 option to 2 and the `window` option to 8.
 
-## Nagios plugin: check_socketlabs
+## Usage
 
-Checks the 
-
-Usage:
-
-    Options:
+    Usage:
+          check_socketlabs [options]
+    where [options] are:
           --api-user, -u <s>:   SocketLabs Username
       --api-password, -p <s>:   SocketLabs API Password
          --server-id, -s <s>:   SocketLabs Server ID
@@ -32,7 +30,7 @@ Usage:
                   --help, -h:   Show this message
 
 
-Example output:
+## Example output
 
     $ check_socketlabs -u myuser -p drowssap -s 1234
     OK: percentage of emails which have been queued but not processed over the last 15 minutes is 1.00 which is under the threshold of 10
@@ -42,4 +40,13 @@ Example output:
 
     $ check_socketlabs -u myuser -p drowssap -s 1234
     OK: there have been more emails processed over the 15 minute window (39) than have been queued (37)
+
+## How to build
+
+    gem build check_socketlabs.gemspec
+
+## How to package
+To turn the gem into an rpm one can use [fpm](https://github.com/jordansissel/fpm)
+
+    fpm -s gem -t rpm check_socketlabs-0.0.1.gem
 
