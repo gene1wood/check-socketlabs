@@ -1,0 +1,114 @@
+#!/usr/bin/env ruby
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Nagios plugin to query a SocketLabs account for the percentage of 
+# queued but unprocessed messages
+
+require "rubygems"
+require "bundler/setup"
+require "socketlab"
+require "timeout"
+require "trollop"
+
+progname = File.basename($0)
+
+opts = Trollop::options do
+  banner <<-EOS
+This is a nagios plugin that interacts with the SocketLabs API 
+to enable monitoring of a SocketLabs account. The plugin fetches the count of 
+messages that have been queued to be processed (sent to SocketLabs) and the 
+count of messages that have been processed (accepted by the recipients MTA) 
+and checks that the percentage of queued messages that have not yet been 
+processed is below a given threshold.
+
+Usage:
+      check_socketlabs [options]
+where [options] are:
+EOS
+  opt :api_user, "SocketLabs Username", :short => '-u', :type => :string,
+      :required => true
+  opt :api_password, "SocketLabs API Password", :short => '-p', 
+      :type => :string, :required => true
+  opt :server_id, "SocketLabs Server ID", :short => '-s', :type => :string,
+      :required => true
+  opt :threshold, "Threshold percentage to alert at", :short => '-T', 
+      :default => 10
+  opt :window, "Window size in minutes to test", :short => '-w', :default => 15
+  opt :offset, "Number of minutes ago to begin the testing window",
+      :short => '-o', :default => 0.5
+  opt :timeout, "SocketLabs API timeout", :short => '-t', :type => :integer,
+      :default => 10
+  opt :verbose, "Verbose output", :short => '-v'
+end
+
+Socketlab.api_user=opts[:api_user]
+Socketlab.api_password=opts[:api_password]
+
+now = Time.new.utc
+start_date = now - (opts[:offset] * 60) - (opts[:window] * 60)
+end_date = now - (opts[:offset] * 60)
+time_format = '%Y-%m-%d %H:%M:%S'
+
+query = {:serverId => opts[:server_id],
+         :count => "1",
+         :type => "JSON",
+         :startDate => start_date.strftime(time_format),
+         :endDate => end_date.strftime(time_format)}
+
+begin
+  queued = Socketlab::MessageQueued.new
+  Timeout::timeout(opts[:timeout]) do
+    queued.api_request(query)
+    queued.set_response
+  end
+  processed = Socketlab::MessageProcessed.new
+  Timeout::timeout(opts[:timeout]) do
+    processed.api_request(query)
+    processed.set_response
+  end
+rescue Timeout::Error, Errno::ENETUNREACH => e
+  puts "UNKNOWN: SocketLabs api timed out (#{$!})"
+  exit 3
+end
+
+if opts[:verbose]
+  debugline=" (queued.total_count=#{queued.total_count})" +
+    "(processed.total_count=#{processed.total_count})" +
+    "(queued.total_count=#{queued.total_count})" +
+    "(start_date=#{start_date.strftime(time_format)})" +
+    "(end_date=#{end_date.strftime(time_format)})" +
+    "(unprocessed messages=#{queued.total_count - processed.total_count})"
+else
+  debugline=""
+end
+
+if queued.total_count <= 0
+  puts "UNKNOWN: number of emails queued for delivery over the " +
+    "#{opts[:window]} minute window is #{queued.total_count}#{debugline}"
+  exit 3
+end
+
+if processed.total_count > queued.total_count
+  # not sure what conditions cause this yet
+  puts "OK: there have been more emails processed over the " +
+    "#{opts[:window]} minute window (#{processed.total_count}) than have " +
+    "been queued (#{queued.total_count})#{debugline}"
+  exit 1
+end
+
+percent_not_processed = (queued.total_count - processed.total_count) * 100 / \
+                         queued.total_count
+if percent_not_processed > opts[:threshold]
+  puts "CRITICAL: #{percent_not_processed}% of emails over the " +
+    "#{opts[:window]} minute window have not been processed. This exceeds " +
+    "the allowed threshold of #{opts[:threshold]}%#{debugline}"
+  exit 2
+end
+
+puts "OK: percentage of emails which have been queued but not processed " +
+  "over the #{opts[:window]} minute window is %.2f which is under the " +
+  "threshold of #{opts[:threshold]}#{debugline}" % percent_not_processed
+exit 0
+
